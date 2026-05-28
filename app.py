@@ -146,7 +146,7 @@ def fetch_market_data(product: str) -> str:
 def get_trading_advice(api_key: str, product: str, balance: float, market_input: str) -> str:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
-        model_name="gemini-2.0-flash",
+        model_name="gemini-2.0-flash-lite",
         system_instruction=SYSTEM_PROMPT,
     )
 
