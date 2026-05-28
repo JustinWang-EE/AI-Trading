@@ -236,16 +236,15 @@ def main():
     st.divider()
 
     # 自動取得市場資料
-    if "market_text" not in st.session_state:
-        st.session_state.market_text = ""
+    if "market_input_area" not in st.session_state:
+        st.session_state.market_input_area = ""
 
     if st.button("🔄 自動取得今日市場資料", use_container_width=True):
         with st.spinner("正在從 Yahoo Finance 抓取即時資料..."):
-            st.session_state.market_text = fetch_market_data(product)
+            st.session_state.market_input_area = fetch_market_data(product)
 
     market_input = st.text_area(
         "📝 今日市場觀察",
-        value=st.session_state.market_text,
         placeholder=(
             "點上方「自動取得今日市場資料」自動填入，\n"
             "或手動輸入你的市場觀察：\n\n"
