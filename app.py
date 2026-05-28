@@ -1,5 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
+import yfinance as yf
+from datetime import datetime
 
 SYSTEM_PROMPT = """你是「AI 交易助理」，專門協助參加「群益新力軍 Top Trader」競賽的學生做交易決策分析。
 
@@ -77,6 +79,69 @@ PRODUCT_OPTIONS = {
     ],
 }
 
+TICKER_MAP = {
+    "EUR/USD 歐元/美元（30倍槓桿）": "EURUSD=X",
+    "USD/JPY 美元/日圓（30倍槓桿）": "JPY=X",
+    "GBP/USD 英鎊/美元（30倍槓桿）": "GBPUSD=X",
+    "AUD/USD 澳幣/美元（20倍槓桿）": "AUDUSD=X",
+    "USD/CHF 美元/瑞郎（20倍槓桿）": "USDCHF=X",
+    "XAU/USD 黃金（20倍槓桿）": "GC=F",
+    "XAG/USD 白銀（10倍槓桿）": "SI=F",
+    "XTI/USD 美國輕原油（10倍槓桿）": "CL=F",
+    "XBR/USD 布蘭特原油（10倍槓桿）": "BZ=F",
+    "DJ30 道瓊指數（20倍槓桿）": "^DJI",
+    "NDAQ100 納斯達克（20倍槓桿）": "^NDX",
+    "SPX500 標普500（20倍槓桿）": "^GSPC",
+    "JPN225 日經225（20倍槓桿）": "^N225",
+    "ES 小型S&P500期貨": "ES=F",
+    "NQ 小型那斯達克期貨": "NQ=F",
+    "MES 微型S&P500期貨": "MES=F",
+    "MNQ 微型那斯達克期貨": "MNQ=F",
+    "GC 黃金期貨": "GC=F",
+    "MGC 微型黃金期貨": "MGC=F",
+    "CL 輕原油期貨": "CL=F",
+    "EC 歐元期貨": "6E=F",
+}
+
+
+def fetch_market_data(product: str) -> str:
+    ticker_symbol = TICKER_MAP.get(product)
+    if not ticker_symbol:
+        return "（無法自動取得此商品資料，請手動輸入）"
+
+    try:
+        ticker = yf.Ticker(ticker_symbol)
+        hist = ticker.history(period="25d")
+
+        if hist.empty or len(hist) < 5:
+            return "（無法取得資料，請手動輸入）"
+
+        current = hist["Close"].iloc[-1]
+        prev = hist["Close"].iloc[-2]
+        change = current - prev
+        change_pct = change / prev * 100
+        high_today = hist["High"].iloc[-1]
+        low_today = hist["Low"].iloc[-1]
+        ma5 = hist["Close"].rolling(5).mean().iloc[-1]
+        ma20 = hist["Close"].rolling(20).mean().iloc[-1]
+
+        vs_ma20 = "高於" if current > ma20 else "低於"
+        trend = "多頭排列" if ma5 > ma20 else "空頭排列"
+        date_str = datetime.now().strftime("%Y/%m/%d %H:%M")
+
+        return (
+            f"【自動取得 — {date_str}】\n"
+            f"• 目前價位：{current:.4f}\n"
+            f"• 今日漲跌：{change:+.4f}（{change_pct:+.2f}%）\n"
+            f"• 今日高點：{high_today:.4f} ／ 低點：{low_today:.4f}\n"
+            f"• MA5：{ma5:.4f} ／ MA20：{ma20:.4f}\n"
+            f"• 現價{vs_ma20} MA20，均線呈{trend}\n\n"
+            f"（可在此補充今日重要消息面資訊）"
+        )
+
+    except Exception as e:
+        return f"（自動取得失敗：{e}，請手動輸入）"
+
 
 def get_trading_advice(api_key: str, product: str, balance: float, market_input: str) -> str:
     genai.configure(api_key=api_key)
@@ -88,17 +153,14 @@ def get_trading_advice(api_key: str, product: str, balance: float, market_input:
     pnl = balance - 100_000
     pnl_pct = pnl / 100_000 * 100
 
-    user_message = f"""
-**交易商品：** {product}
-**目前帳戶淨值：** USD {balance:,.0f}
-**初始資金：** USD 100,000
-**目前損益：** USD {pnl:+,.0f}（{pnl_pct:+.1f}%）
-
-**今日市場觀察：**
-{market_input}
-
-請根據以上資訊給出完整的交易分析與建議。
-"""
+    user_message = (
+        f"**交易商品：** {product}\n"
+        f"**目前帳戶淨值：** USD {balance:,.0f}\n"
+        f"**初始資金：** USD 100,000\n"
+        f"**目前損益：** USD {pnl:+,.0f}（{pnl_pct:+.1f}%）\n\n"
+        f"**今日市場觀察：**\n{market_input}\n\n"
+        f"請根據以上資訊給出完整的交易分析與建議。"
+    )
 
     response = model.generate_content(user_message)
     return response.text
@@ -173,17 +235,26 @@ def main():
 
     st.divider()
 
+    # 自動取得市場資料
+    if "market_text" not in st.session_state:
+        st.session_state.market_text = ""
+
+    if st.button("🔄 自動取得今日市場資料", use_container_width=True):
+        with st.spinner("正在從 Yahoo Finance 抓取即時資料..."):
+            st.session_state.market_text = fetch_market_data(product)
+
     market_input = st.text_area(
         "📝 今日市場觀察",
+        value=st.session_state.market_text,
         placeholder=(
-            "請輸入你觀察到的市場資訊，例如：\n\n"
-            "• 今日重要消息：Fed 維持利率不變，鮑爾發言偏鴿派\n"
-            "• 目前價位：EUR/USD 現價 1.0850\n"
-            "• 技術面：站上 20MA，RSI 約 55，近期高點 1.0900\n"
-            "• 市場情緒：美元偏弱，歐元需求升溫\n"
-            "• 即將公布數據：今晚 21:30 美國非農就業數據"
+            "點上方「自動取得今日市場資料」自動填入，\n"
+            "或手動輸入你的市場觀察：\n\n"
+            "• 目前價位、今日漲跌\n"
+            "• 重要消息（Fed、非農、CPI...）\n"
+            "• 技術訊號（均線、RSI...）"
         ),
         height=220,
+        key="market_input_area",
     )
 
     if not api_key:
@@ -191,7 +262,7 @@ def main():
 
     if st.button("🤖 取得 AI 交易建議", type="primary", use_container_width=True, disabled=not api_key):
         if not market_input.strip():
-            st.warning("請先輸入今日市場觀察")
+            st.warning("請先取得或輸入今日市場觀察")
         else:
             with st.spinner("Gemini AI 分析中..."):
                 try:
